@@ -41,12 +41,14 @@ try{
   Set-WidgetDesktopLayer $petHandle $true
   if([GptWidgetZOrderNative]::GetWindowLongPtr($petHandle,-8)-ne [IntPtr]::Zero){throw 'Desktop pet still owned by chat'}
   if(![GptWidgetZOrderNative]::Topmost($petHandle)){throw 'Desktop topmost failed'}
+  if(!$pet.Topmost){throw 'Desktop topmost did not update WPF state'}
   $owner.WindowState=[Windows.WindowState]::Minimized
   if(![GptWidgetZOrderNative]::IsWindowVisible($petHandle)){throw 'Pet hidden with minimized chat'}
   $owner.Close()
   if(![GptWidgetZOrderNative]::IsWindow($petHandle)){throw 'Pet destroyed with closed chat'}
   Set-WidgetDesktopLayer $petHandle $false
   if([GptWidgetZOrderNative]::Topmost($petHandle)){throw 'Topmost toggle failed'}
+  if($pet.Topmost){throw 'Disabling topmost did not update WPF state'}
   # Use the real appearance and mode-switch functions with deterministic geometry.
   $script:window=$pet;$script:widgetHandle=$petHandle;$script:hostHandle=[IntPtr]::Zero;$script:hostFollower=$follower
   $script:ui=@{Root=(New-Object Windows.Controls.Grid)};$script:scale=2.5;$script:followHost=$false;$script:desktopTopmost=$true
@@ -62,9 +64,11 @@ try{
   Set-WidgetDesktopLayer $petHandle $true
   Set-WidgetFollowHost $true
   if([GptWidgetZOrderNative]::Topmost($petHandle)){throw 'Returning to window mode retained desktop topmost'}
+  if($pet.Topmost){throw 'Returning to window mode retained WPF topmost'}
   if(!$script:desktopTopmost){throw 'Window mode lost the remembered desktop preference'}
   Set-WidgetFollowHost $false
   if(![GptWidgetZOrderNative]::Topmost($petHandle)){throw 'Returning to desktop mode lost its topmost setting'}
+  if(!$pet.Topmost){throw 'Returning to desktop mode lost WPF topmost'}
   Write-Output 'PASS: detached pet survives host minimization and closure; topmost toggle works'
   Write-Output 'PASS: desktop work-area scaling and immediate topmost cancellation on mode switches'
 }finally{if($follower){$follower.Dispose()};$pet.Close();$owner.Close()}

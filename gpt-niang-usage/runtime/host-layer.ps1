@@ -43,6 +43,11 @@ function Set-WidgetDesktopLayer([IntPtr]$Widget,[bool]$Topmost=$true){
   if([GptWidgetZOrderNative]::GetWindowLongPtr($Widget,-8)-ne [IntPtr]::Zero){
     [GptWidgetZOrderNative]::SetWindowLongPtr($Widget,-8,[IntPtr]::Zero)|Out-Null
   }
+  # Keep WPF's saved layer in sync with the native band, including reminder restoration.
+  $source=[Windows.Interop.HwndSource]::FromHwnd($Widget)
+  if($source -and $source.RootVisual-is [Windows.Window] -and $source.RootVisual.Topmost-ne $Topmost){
+    $source.RootVisual.Topmost=$Topmost
+  }
   if([GptWidgetZOrderNative]::Topmost($Widget)-ne $Topmost){
     $band=if($Topmost){[IntPtr](-1)}else{[IntPtr](-2)}
     [GptWidgetZOrderNative]::SetWindowPos($Widget,$band,0,0,0,0,0x13)|Out-Null
