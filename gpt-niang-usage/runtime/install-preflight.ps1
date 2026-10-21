@@ -58,7 +58,8 @@ function Get-WidgetInstallPreflight {
 }
 function Assert-WidgetPluginRegistration([string]$Codex,[string]$Version) {
   $processInfo=New-Object System.Diagnostics.ProcessStartInfo
-  $processInfo.FileName=$Codex;$processInfo.Arguments='plugin list --json';$processInfo.UseShellExecute=$false
+  # Verify this local marketplace without waiting for the remote plugin catalog.
+  $processInfo.FileName=$Codex;$processInfo.Arguments='plugin list --marketplace gpt-niang-local --json';$processInfo.UseShellExecute=$false
   $processInfo.RedirectStandardOutput=$true;$processInfo.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
   $process=New-Object System.Diagnostics.Process;$process.StartInfo=$processInfo
   try{
