@@ -123,7 +123,7 @@ $script:bubbleMode='quota';$script:sceneStartedAt=0;$script:sceneDeadline=0;$scr
 $script:resetTimeMode='countdown';$script:resetPhaseTimer=$null
 $script:displayRequestToken=$null
 $script:quotaStepReminderEnabled=$true
-$script:quotaStepReminderState=@{bucket=$null;account=$null;resetsAt=$null;pending=$false;displayCount=0}
+$script:quotaStepReminderState=@{windows=@{};account=$null;pending=$false;displayCount=0}
 $settingsFile=Join-Path $script:dataDir 'settings.json'
 $script:settingsLoadFailed=$false
 try{$settings=Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -666,21 +666,26 @@ function Set-ResetTimeMode([string]$mode,[long]$nowMilliseconds){
 }
 function Update-QuotaStepState($State,$Status,[long]$Now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) {
   if(!$Status -or $Status.queryOk-ne $true -or !$Status.ok -or $Status.error){return}
-  $q=@($Status.windows|Where-Object{$_.minutes-eq 300 -and $_.kind-ne 'individual'})[0]
-  if(!$q -or $null-eq $q.remaining -or ($q.resetsAt -and [double]$q.resetsAt-le $Now)){
-    $State.bucket=$null;$State.pending=$false;return
+  if($State.account-ne [string]$Status.accountKey){$State.windows.Clear();$State.account=[string]$Status.accountKey}
+  $present=@{}
+  foreach($q in @($Status.windows|Where-Object{$_.minutes-in @(300,10080) -and $_.kind-ne 'individual'})){
+    if($null-eq $q.remaining -or ($q.resetsAt -and [double]$q.resetsAt-le $Now)){continue}
+    $key=[string]$q.minutes;$present[$key]=$true
+    $bucket=[int][Math]::Ceiling([double]$q.remaining/5)
+    $window=$State.windows[$key]
+    if(!$window -or $window.resetsAt-ne [string]$q.resetsAt){
+      $State.windows[$key]=@{bucket=$bucket;resetsAt=[string]$q.resetsAt;pending=$false}
+    }elseif($bucket-lt $window.bucket){
+      # Track each window independently and do not repeat corrected estimates.
+      $window.bucket=$bucket;$window.pending=$true
+    }
   }
-  $bucket=[int][Math]::Ceiling([double]$q.remaining/5)
-  if($null-eq $State.bucket -or $State.account-ne [string]$Status.accountKey -or $State.resetsAt-ne [string]$q.resetsAt){
-    $State.bucket=$bucket;$State.account=[string]$Status.accountKey;$State.resetsAt=[string]$q.resetsAt;$State.pending=$false;return
-  }
-  # Keep the lowest bucket for this window so a corrected estimate cannot
-  # repeat an already announced threshold. Coalesce a multi-step drop.
-  if($bucket-lt $State.bucket){$State.bucket=$bucket;$State.pending=$true}
+  foreach($key in @($State.windows.Keys)){if(!$present.ContainsKey($key)){$State.windows.Remove($key)}}
+  $State.pending=@($State.windows.Values|Where-Object{$_.pending}).Count-gt 0
 }
 function Set-QuotaStepReminderEnabled([bool]$Enabled) {
   $script:quotaStepReminderEnabled=$Enabled
-  $script:quotaStepReminderState.bucket=$null;$script:quotaStepReminderState.pending=$false
+  $script:quotaStepReminderState.windows.Clear();$script:quotaStepReminderState.pending=$false
   if($Enabled){Update-QuotaStepState $script:quotaStepReminderState $script:status}
   Save-Settings
 }
@@ -693,6 +698,7 @@ function Tick-QuotaStepReminder([bool]$Visible) {
   # The update already contains fresh quota data; opening the bubble should
   # not start another quota query.
   Open-WidgetBubble 'quota'
+  foreach($window in $script:quotaStepReminderState.windows.Values){$window.pending=$false}
   $script:quotaStepReminderState.pending=$false;$script:quotaStepReminderState.displayCount++
 }
 function Update-Quota {
