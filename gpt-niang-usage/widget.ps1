@@ -998,6 +998,9 @@ function Tick-Widget {
       $script:attachedHost=$script:hostHandle;$script:lastPosition=$null
     }
     $showWidget=!$script:window.IsVisible
+    # PointToScreen in desktop bounds needs an attached WPF visual tree.
+    # EnsureHandle alone does not attach it on the first manual launch.
+    if($showWidget){$script:window.Show();$script:window.UpdateLayout()}
     if(!$script:drag){
       $frame=$placementFrame;$dpi=$placementDpi
       if($dpi-le 0){$dpi=1}
@@ -1035,7 +1038,7 @@ function Tick-Widget {
       if(!$script:occlusionRecovery.OwnedCloak){$layer=Set-WidgetAboveHost $script:widgetHandle $script:hostHandle $musicLight}
     }
     else{Set-WidgetDesktopLayer $script:widgetHandle $script:desktopTopmost}
-    if($showWidget){Reset-WidgetAutoQuoteSchedule $now;$script:window.Show();$script:lastPosition=$null;Request-Refresh}
+    if($showWidget){Reset-WidgetAutoQuoteSchedule $now;$script:lastPosition=$null;Request-Refresh}
   }elseif($script:window.IsVisible){
     Reset-WidgetAutoQuoteSchedule $now
     $script:hostFollower.Suspend()
