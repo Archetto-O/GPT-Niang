@@ -15,7 +15,8 @@ function Load-Functions([string]$File,[string[]]$Names){
 }
 Load-Functions (Join-Path $AppRoot 'widget.ps1') @('Update-QuotaStepState','Set-QuotaStepReminderEnabled','Tick-QuotaStepReminder','Write-WidgetJson','Save-Settings')
 Load-Functions (Join-Path $AppRoot 'runtime\color-theme.ps1') @('Get-QuotaBarColor','Restore-WidgetOriginalColors','Update-WidgetColorScene')
-function New-State {return @{bucket=$null;account=$null;resetsAt=$null;pending=$false;displayCount=0}}
+function New-State {return @{windows=@{};account=$null;pending=$false;displayCount=0}}
+function Acknowledge($State){foreach($window in $State.windows.Values){$window.pending=$false};$State.pending=$false}
 function Snapshot([double]$Remaining,[long]$Reset=2000,[string]$Account='one'){
   return @{ok=$true;queryOk=$true;accountKey=$Account;windows=@(@{minutes=300;remaining=$Remaining;used=(100-$Remaining);resetsAt=$Reset})}
 }
@@ -26,18 +27,18 @@ Update-QuotaStepState $state (Snapshot 46) 1000
 Assert (!$state.pending) '47 to 46 must not cross a threshold'
 Update-QuotaStepState $state (Snapshot 44) 1000
 Assert $state.pending '47 to 44 must cross 45 percent'
-$state.pending=$false
+Acknowledge $state
 Update-QuotaStepState $state (Snapshot 44) 1000
 Assert (!$state.pending) 'Repeated data must not repeat a reminder'
 Update-QuotaStepState $state (Snapshot 46) 1000
 Update-QuotaStepState $state (Snapshot 44) 1000
 Assert (!$state.pending) 'A corrected estimate must not repeat the same threshold'
 Update-QuotaStepState $state (Snapshot 29) 1000
-Assert ($state.pending -and $state.bucket-eq 6) 'A multi-threshold drop must coalesce to one pending reminder'
-$state.pending=$false
+Assert ($state.pending -and $state.windows['300'].bucket-eq 6) 'A multi-threshold drop must coalesce to one pending reminder'
+Acknowledge $state
 $failed=Snapshot 24;$failed.queryOk=$false
 Update-QuotaStepState $state $failed 1000
-Assert (!$state.pending -and $state.bucket-eq 6) 'A failed query must not consume a threshold'
+Assert (!$state.pending -and $state.windows['300'].bucket-eq 6) 'A failed query must not consume a threshold'
 Update-QuotaStepState $state (Snapshot 24) 1000
 Assert $state.pending 'The next successful query must still detect the drop'
 Update-QuotaStepState $state (Snapshot 100 3000) 1000
@@ -47,15 +48,39 @@ Assert $state.pending 'Reaching an exact threshold must trigger'
 Update-QuotaStepState $state (Snapshot 40 3000 'two') 1000
 Assert (!$state.pending) 'Changing account must clear an old pending reminder'
 Update-QuotaStepState $state (Snapshot 35 500) 1000
-Assert (!$state.pending -and $null-eq $state.bucket) 'Expired windows must not trigger'
+Assert (!$state.pending -and $state.windows.Count-eq 0) 'Expired windows must not trigger'
 Update-QuotaStepState $state (Snapshot 45.01) 1000
 Update-QuotaStepState $state (Snapshot 45) 1000
 Assert $state.pending 'Fractional values must cross exactly at 45 percent'
 Update-QuotaStepState $state @{ok=$true;queryOk=$true;windows=@(@{minutes=10080;remaining=5})} 1000
-Assert (!$state.pending -and $null-eq $state.bucket) 'Weekly-only plans must not create five-hour alerts'
+Assert (!$state.pending -and $state.windows.Count-eq 1 -and $state.windows.ContainsKey('10080')) 'Weekly-only plans establish their own baseline'
+Update-QuotaStepState $state @{ok=$true;queryOk=$true;windows=@(@{minutes=10080;remaining=0})} 1000
+Assert $state.pending 'Weekly-only plans must alert on crossing a threshold'
+function Pair([double]$Short,[double]$Week,[long]$ShortReset=2000,[long]$WeekReset=4000){
+  $snapshot=Snapshot $Short $ShortReset
+  $snapshot.windows+=@{minutes=10080;remaining=$Week;used=(100-$Week);resetsAt=$WeekReset}
+  return $snapshot
+}
+$state=New-State
+Update-QuotaStepState $state (Pair 47 67) 1000
+Update-QuotaStepState $state (Pair 44 66) 1000
+Assert ($state.windows['300'].pending -and !$state.windows['10080'].pending) 'A five-hour drop must not consume the weekly threshold'
+Acknowledge $state
+Update-QuotaStepState $state (Pair 44 64) 1000
+Assert ($state.windows['10080'].pending -and !$state.windows['300'].pending) 'A weekly drop must trigger independently'
+Acknowledge $state
+Update-QuotaStepState $state (Pair 39 59) 1000
+Assert ($state.pending -and @($state.windows.Values|Where-Object{$_.pending}).Count-eq 2) 'Both windows may cross in the same update'
+Acknowledge $state
+Update-QuotaStepState $state (Pair 100 54 3000) 1000
+Assert (!$state.windows['300'].pending -and $state.windows['10080'].pending) 'A five-hour reset must not suppress a weekly crossing'
+Acknowledge $state
+Update-QuotaStepState $state (Pair 95 100 3000 5000) 1000
+Assert ($state.windows['300'].pending -and !$state.windows['10080'].pending) 'A weekly reset must not suppress a five-hour crossing'
 
 $script:quotaStepReminderState=New-State
-$script:quotaStepReminderState.pending=$true
+Update-QuotaStepState $script:quotaStepReminderState (Pair 47 67) 1000
+Update-QuotaStepState $script:quotaStepReminderState (Pair 44 64) 1000
 $script:quotaStepReminderEnabled=$true
 $script:status=Snapshot 44
 $script:window=@{IsVisible=$true};$script:context=@{IsOpen=$false}
@@ -76,14 +101,16 @@ $script:collapsed=$true
 Tick-QuotaStepReminder $true
 Tick-QuotaStepReminder $true
 Assert ($script:opened-eq 1 -and $script:quotaStepReminderState.displayCount-eq 1 -and !$script:quotaStepReminderState.pending) 'Deferred reminder must display only once'
+Assert (@($script:quotaStepReminderState.windows.Values|Where-Object{$_.pending}).Count-eq 0) 'One popup must acknowledge both pending windows'
 $script:quotaStepReminderEnabled=$false;$script:quotaStepReminderState.pending=$true
 Tick-QuotaStepReminder $true
 Assert ($script:opened-eq 1) 'Disabled setting must suppress reminders'
 $settingsFile=Join-Path ([IO.Path]::GetTempPath()) ('gpt-niang-quota-reminder-'+[Guid]::NewGuid().ToString('N')+'.json')
 try{
+  $script:status=Snapshot 44 ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+3600)
   Set-QuotaStepReminderEnabled $true
   $saved=Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8|ConvertFrom-Json
-  Assert ($saved.quotaStepReminder-eq $true -and !$script:quotaStepReminderState.pending) 'Enabling must persist and establish a baseline without a popup'
+  Assert ($saved.quotaStepReminder-eq $true -and !$script:quotaStepReminderState.pending -and $script:quotaStepReminderState.windows.Count-eq 1) 'Enabling must persist and establish a baseline without a popup'
   Set-QuotaStepReminderEnabled $false
   $saved=Get-Content -LiteralPath $settingsFile -Raw -Encoding UTF8|ConvertFrom-Json
   Assert ($saved.quotaStepReminder-eq $false) 'Disabling must persist'
