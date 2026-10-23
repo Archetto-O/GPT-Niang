@@ -1071,7 +1071,8 @@ $script:winEventCallback=[GptWidgetNative+WinEventProc]{param($hook,$ev,$hwnd,$o
   if($hwnd-eq $script:hostHandle -and $objectId-eq 0 -and $childId-eq 0){
     if($ev-eq 16){$script:context.IsOpen=$false}
   }
-  if($ev-eq 3 -or ($objectId-eq 0 -and $childId-eq 0 -and ($hwnd-eq $script:hostHandle -or ($script:hostHandle-eq [IntPtr]::Zero -and [GptWidgetNative]::IsCodex($hwnd))))){
+  $desktopLayerChanged=!$script:followHost -and $script:desktopTopmost -and $hwnd-ne [IntPtr]::Zero -and [GptWidgetNative]::GetAncestor($hwnd,2)-eq $hwnd -and ($ev-eq 0x8004 -or ($objectId-eq 0 -and $childId-eq 0 -and $ev-in @(17,22,23,0x8002,0x800A)))
+  if($desktopLayerChanged -or $ev-eq 3 -or ($objectId-eq 0 -and $childId-eq 0 -and ($hwnd-eq $script:hostHandle -or ($script:hostHandle-eq [IntPtr]::Zero -and [GptWidgetNative]::IsCodex($hwnd))))){
     # Native movement is immediate. Only lifecycle, DPI/resize and popup layout
     # need the slower PowerShell update.
     if(!$script:hostEventTimer.IsEnabled){$script:hostEventTimer.Start()}
@@ -1083,7 +1084,7 @@ $script:hostEventTimer.Add_Tick({$script:hostEventTimer.Stop();try{Tick-Widget}c
 $script:eventHooks=@(
   [GptWidgetNative]::Hook(3,3,$script:winEventCallback),
   [GptWidgetNative]::Hook(16,23,$script:winEventCallback),
-  [GptWidgetNative]::Hook(0x8000,0x8003,$script:winEventCallback),
+  [GptWidgetNative]::Hook(0x8000,0x8004,$script:winEventCallback),
   [GptWidgetNative]::Hook(0x800A,0x800A,$script:winEventCallback)
 )
 $script:timer=New-Object Windows.Threading.DispatcherTimer

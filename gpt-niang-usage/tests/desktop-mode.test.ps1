@@ -42,6 +42,17 @@ try{
   if([GptWidgetZOrderNative]::GetWindowLongPtr($petHandle,-8)-ne [IntPtr]::Zero){throw 'Desktop pet still owned by chat'}
   if(![GptWidgetZOrderNative]::Topmost($petHandle)){throw 'Desktop topmost failed'}
   if(!$pet.Topmost){throw 'Desktop topmost did not update WPF state'}
+  # A later topmost window can cover the pet without clearing its topmost flag.
+  $owner.Topmost=$true
+  foreach($cycle in 1..3){
+    if(![GptWidgetZOrderNative]::SetWindowPos($ownerHandle,[IntPtr](-1),0,0,0,0,0x13)){throw 'Cover fixture placement failed'}
+    Set-WidgetDesktopLayer $petHandle $true
+    $above=[GptWidgetZOrderNative]::GetWindow($ownerHandle,3)
+    while($above-ne [IntPtr]::Zero -and $above-ne $petHandle){$above=[GptWidgetZOrderNative]::GetWindow($above,3)}
+    if($above-ne $petHandle){throw 'Desktop pet did not recover above a later topmost window'}
+  }
+  $owner.Topmost=$false
+  Write-Output 'PASS: desktop topmost recovers above later topmost windows across repeated transitions'
   $owner.WindowState=[Windows.WindowState]::Minimized
   if(![GptWidgetZOrderNative]::IsWindowVisible($petHandle)){throw 'Pet hidden with minimized chat'}
   $owner.Close()

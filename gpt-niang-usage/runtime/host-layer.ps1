@@ -48,7 +48,9 @@ function Set-WidgetDesktopLayer([IntPtr]$Widget,[bool]$Topmost=$true){
   if($source -and $source.RootVisual-is [Windows.Window] -and $source.RootVisual.Topmost-ne $Topmost){
     $source.RootVisual.Topmost=$Topmost
   }
-  if([GptWidgetZOrderNative]::Topmost($Widget)-ne $Topmost){
+  # A topmost flag does not preserve order against later fullscreen windows.
+  # Reassert the band without activation during the existing desktop sync.
+  if($Topmost -or ([GptWidgetZOrderNative]::Topmost($Widget)-ne $Topmost)){
     $band=if($Topmost){[IntPtr](-1)}else{[IntPtr](-2)}
     [GptWidgetZOrderNative]::SetWindowPos($Widget,$band,0,0,0,0,0x13)|Out-Null
   }
